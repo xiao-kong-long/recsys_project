@@ -261,3 +261,9 @@ if __name__ == "__main__":
     for sim_item_id, similarity in similar:
         movie_name = data["items"][data["items"]["movie_id"] == sim_item_id]["title"].values[0]
         print(f"  {movie_name}: {similarity:.4f}")
+
+    # 保存模型
+    model_path = "item2vec_model.bin"
+    model.save(model_path)
+    print(f"\n模型已保存到: {model_path}")
+    print("运行评估: python evaluate.py")

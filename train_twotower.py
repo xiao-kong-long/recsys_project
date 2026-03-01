@@ -2,7 +2,7 @@
 
 import argparse
 import os
-from dataset import load_movielens_100k
+from dataset import load_movielens_train_test
 from twotower import TwoTowerModel
 
 
@@ -36,11 +36,12 @@ def main():
 
     # 加载数据
     print(f"从 {args.data_path} 加载数据...")
-    data = load_movielens_100k(args.data_path)
+    data = load_movielens_train_test(args.data_path, split="ua")
 
     print(f"用户数: {len(data['users'])}")
     print(f"电影数: {len(data['items'])}")
-    print(f"评分数: {len(data['ratings'])}")
+    print(f"训练集评分数: {len(data['train_ratings'])}")
+    print(f"测试集评分数: {len(data['test_ratings'])}")
 
     # 初始化模型
     model = TwoTowerModel(
@@ -56,7 +57,7 @@ def main():
     model.fit(
         users_df=data["users"],
         items_df=data["items"],
-        ratings_df=data["ratings"],
+        ratings_df=data["train_ratings"],
         epochs=args.epochs,
         batch_size=args.batch_size,
         num_negatives=args.num_negatives,

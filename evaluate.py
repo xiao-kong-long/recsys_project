@@ -338,20 +338,20 @@ def get_item_genres(item_row: pd.Series, genre_names: List[str] = None) -> List[
 
 def evaluate_recommendation(
     model,
-    ratings_df: pd.DataFrame,
+    test_ratings_df: pd.DataFrame,
     items_df: pd.DataFrame,
+    train_ratings_df: pd.DataFrame = None,
     top_k: int = 10,
-    test_ratio: float = 0.2,
     output_dir: str = "results"
 ) -> Dict[str, float]:
     """评估推荐任务性能
 
     Args:
-        model: 训练好的 Item2Vec 模型
-        ratings_df: 评分数据
+        model: 训练好的模型 (Item2Vec 或 TwoTower)
+        test_ratings_df: 测试集评分数据
         items_df: 电影数据
+        train_ratings_df: 训练集评分数据（用于获取用户历史）
         top_k: 推荐列表长度
-        test_ratio: 测试集比例
         output_dir: 结果保存目录
 
     Returns:
@@ -359,14 +359,13 @@ def evaluate_recommendation(
     """
     os.makedirs(output_dir, exist_ok=True)
 
-    # 为每个用户划分测试集
-    test_items_by_user = defaultdict(list)
+    # 如果没有提供训练集，使用测试集作为用户历史
+    user_history = train_ratings_df if train_ratings_df is not None else test_ratings_df
 
-    for user_id, group in ratings_df.groupby("user_id"):
-        sorted_group = group.sort_values("timestamp")
-        n_test = max(1, int(len(sorted_group) * test_ratio))
-        test_items = sorted_group.tail(n_test)["item_id"].tolist()
-        test_items_by_user[user_id] = set(test_items)
+    # 按用户组织测试集
+    test_items_by_user = defaultdict(list)
+    for user_id, group in test_ratings_df.groupby("user_id"):
+        test_items_by_user[user_id] = set(group["item_id"].tolist())
 
     # 计算评估指标
     precision_scores = []
@@ -375,15 +374,24 @@ def evaluate_recommendation(
         if not test_items:
             continue
 
-        user_items = ratings_df[ratings_df["user_id"] == user_id]["item_id"].tolist()
+        # 获取用户历史评分的物品
+        user_items = user_history[user_history["user_id"] == user_id]["item_id"].tolist()
 
         for test_item in test_items:
-            # 获取与测试项目相似的电影
-            similar = model.similar_items(test_item, top_k=top_k)
-            similar_ids = [sid for sid, _ in similar]
+            # 根据模型类型获取推荐
+            if hasattr(model, 'similar_items'):
+                # Item2Vec: 获取与测试项目相似的电影
+                similar = model.similar_items(test_item, top_k=top_k)
+                similar_ids = [sid for sid, _ in similar]
+            elif hasattr(model, 'recommend'):
+                # TwoTower: 直接为用户推荐
+                recommendations = model.recommend(user_id, top_k=top_k, exclude_rated=False)
+                similar_ids = [sid for sid, _ in recommendations]
+            else:
+                continue
 
-            # 计算命中数：相似电影中，用户也评分过的电影（排除测试项目本身）
-            hits = len(set(similar_ids) & (set(user_items) - {test_item}))
+            # 计算命中数：推荐列表中，用户在测试集也评分过的电影
+            hits = len(set(similar_ids) & (set(test_items) - {test_item}))
             precision = hits / top_k if top_k > 0 else 0
 
             precision_scores.append(precision)
@@ -414,8 +422,9 @@ def full_evaluation(
     """完整评估流程
 
     Args:
-        model: Item2Vec 模型
-        data: 包含 users, items, ratings 的字典
+        model: 训练好的模型 (Item2Vec 或 TwoTower)
+        data: 包含 users, items, ratings 的字典，
+              或者包含 users, items, train_ratings, test_ratings 的字典
         output_dir: 结果保存目录
 
     Returns:
@@ -466,7 +475,14 @@ def full_evaluation(
 
     # 5. 推荐任务评估
     print("\n[5/5] 推荐任务评估...")
-    rec_results = evaluate_recommendation(model, data["ratings"], data["items"], output_dir=output_dir)
+    # 判断数据是否包含训练集和测试集
+    if "test_ratings" in data and "train_ratings" in data:
+        rec_results = evaluate_recommendation(
+            model, data["test_ratings"], data["items"],
+            train_ratings_df=data["train_ratings"], output_dir=output_dir
+        )
+    else:
+        rec_results = evaluate_recommendation(model, data["ratings"], data["items"], output_dir=output_dir)
     results["recommendation"] = rec_results
     print(f"Precision@10: {rec_results['precision@k']:.4f}")
 
@@ -478,13 +494,34 @@ def full_evaluation(
 
 
 if __name__ == "__main__":
-    from dataset import load_movielens_100k
-    from item2vec import Item2Vec
+    import argparse
 
-    print("加载数据...")
-    data = load_movielens_100k()
+    parser = argparse.ArgumentParser(description="评估推荐模型")
+    parser.add_argument("--model", type=str, default="item2vec", choices=["item2vec", "twotower"], help="模型类型")
+    parser.add_argument("--model-path", type=str, default=None, help="模型路径（默认使用 item2vec_model.bin 或 models/twotower_model.pt）")
+    parser.add_argument("--data-path", type=str, default="data/ml-100k", help="数据集路径")
+    parser.add_argument("--split", type=str, default="ua", choices=["ua", "ub"], help="数据划分方式")
+    parser.add_argument("--output-dir", type=str, default="results", help="结果保存目录")
 
-    print("加载模型...")
-    model = Item2Vec.load("item2vec_model.bin")
+    args = parser.parse_args()
 
-    results = full_evaluation(model, data, output_dir="results")
+    # 加载数据（使用训练/测试集划分）
+    print(f"加载数据...")
+    from dataset import load_movielens_train_test
+    data = load_movielens_train_test(args.data_path, split=args.split)
+
+    print(f"训练集评分数: {len(data['train_ratings'])}")
+    print(f"测试集评分数: {len(data['test_ratings'])}")
+
+    # 加载模型
+    print(f"加载模型...")
+    if args.model == "item2vec":
+        from item2vec import Item2Vec
+        model_path = args.model_path or "item2vec_model.bin"
+        model = Item2Vec.load(model_path)
+    else:  # twotower
+        from twotower import TwoTowerModel
+        model_path = args.model_path or "models/twotower_model.pt"
+        model = TwoTowerModel.load(model_path)
+
+    results = full_evaluation(model, data, output_dir=args.output_dir)

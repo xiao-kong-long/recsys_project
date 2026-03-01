@@ -113,6 +113,24 @@ def load_movielens_100k(base_path: str = "data/ml-100k") -> Dict[str, pd.DataFra
     }
 
 
+def load_movielens_train_test(base_path: str = "data/ml-100k", split: str = "ua") -> Dict[str, pd.DataFrame]:
+    """加载 MovieLens 100K 数据集，返回训练集和测试集
+
+    Args:
+        base_path: 数据集路径
+        split: 划分方式，"ua" 或 "ub"
+
+    Returns:
+        包含 users, items, train_ratings, test_ratings 的字典
+    """
+    return {
+        "users": load_users(f"{base_path}/u.user"),
+        "items": load_items(f"{base_path}/u.item"),
+        "train_ratings": load_ratings(f"{base_path}/{split}.base"),
+        "test_ratings": load_ratings(f"{base_path}/{split}.test")
+    }
+
+
 def get_genre_names() -> List[str]:
     """获取电影类型名称列表
 

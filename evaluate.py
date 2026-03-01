@@ -378,12 +378,13 @@ def evaluate_recommendation(
         user_items = ratings_df[ratings_df["user_id"] == user_id]["item_id"].tolist()
 
         for test_item in test_items:
-            if test_item not in user_items:
-                similar = model.similar_items(test_item, top_k=top_k)
-                similar_ids = [sid for sid, _ in similar]
+            # 获取与测试项目相似的电影
+            similar = model.similar_items(test_item, top_k=top_k)
+            similar_ids = [sid for sid, _ in similar]
 
-                hits = len(set(similar_ids) & (set(user_items) - {test_item}))
-                precision = hits / top_k if top_k > 0 else 0
+            # 计算命中数：相似电影中，用户也评分过的电影（排除测试项目本身）
+            hits = len(set(similar_ids) & (set(user_items) - {test_item}))
+            precision = hits / top_k if top_k > 0 else 0
 
             precision_scores.append(precision)
 

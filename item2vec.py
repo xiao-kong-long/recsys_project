@@ -224,6 +224,8 @@ class Item2Vec:
 
         instance = cls(**init_kwargs)
         instance.model = Word2Vec.load(filepath)
+        # 从加载的模型中获取实际的向量维度
+        instance.embedding_dim = instance.model.wv.vector_size
         return instance
 
 
